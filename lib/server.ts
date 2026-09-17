@@ -1,7 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 import webpush from "web-push";
+import { supabaseUrl } from "@/lib/env";
 export function admin() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL,
+  const url = supabaseUrl(),
     key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) throw Error("Supabase не настроен");
   return createClient(url, key, {
@@ -22,7 +23,10 @@ export async function authenticate(request: Request) {
   const { data, error } = await admin().auth.getUser(token);
   return error ? null : data.user;
 }
-export async function deliver(userId: string, payload: { tag?: string; title: string; body: string }) {
+export async function deliver(
+  userId: string,
+  payload: { tag?: string; title: string; body: string },
+) {
   const db = admin(),
     client = pushClient();
   const { data, error } = await db
