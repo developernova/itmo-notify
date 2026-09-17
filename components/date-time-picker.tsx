@@ -39,9 +39,6 @@ export function DateTimePicker({
   busyDates?: Date[];
 }) {
   const [open, setOpen] = useState(false);
-  const minutes = minuteSteps.includes(value.getMinutes())
-    ? minuteSteps
-    : [...minuteSteps, value.getMinutes()].sort((a, b) => a - b);
 
   function withDate(date: Date) {
     const next = new Date(date);
@@ -109,45 +106,67 @@ export function DateTimePicker({
           />
         </PopoverContent>
       </Popover>
-      <div className="flex shrink-0 items-center gap-1">
-        <Select
-          value={pad(value.getHours())}
-          onValueChange={(hour) => withTime(Number(hour), value.getMinutes())}
+      <TimeFields
+        hour={value.getHours()}
+        minute={value.getMinutes()}
+        onChange={withTime}
+      />
+    </div>
+  );
+}
+
+/** Часы и минуты двумя списками. Минуты — шаг 5 плюс 59 и любое своё значение. */
+export function TimeFields({
+  hour,
+  minute,
+  onChange,
+}: {
+  hour: number;
+  minute: number;
+  onChange: (hour: number, minute: number) => void;
+}) {
+  const minutes = minuteSteps.includes(minute)
+    ? minuteSteps
+    : [...minuteSteps, minute].sort((a, b) => a - b);
+  return (
+    <div className="flex shrink-0 items-center gap-1">
+      <Select
+        value={pad(hour)}
+        onValueChange={(next) => onChange(Number(next), minute)}
+      >
+        <SelectTrigger
+          aria-label="Часы"
+          className="h-12 w-16 justify-center px-2 text-base"
         >
-          <SelectTrigger
-            aria-label="Часы"
-            className="h-12 w-16 justify-center px-2 text-base"
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent position="popper" className="min-w-0">
-            {hours.map((hour) => (
-              <SelectItem key={hour} value={hour}>
-                {hour}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <span className="text-muted-foreground">:</span>
-        <Select
-          value={pad(value.getMinutes())}
-          onValueChange={(minute) => withTime(value.getHours(), Number(minute))}
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent position="popper" className="min-w-0">
+          {hours.map((value) => (
+            <SelectItem key={value} value={value}>
+              {value}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <span className="text-muted-foreground">:</span>
+      <Select
+        value={pad(minute)}
+        onValueChange={(next) => onChange(hour, Number(next))}
+      >
+        <SelectTrigger
+          aria-label="Минуты"
+          className="h-12 w-16 justify-center px-2 text-base"
         >
-          <SelectTrigger
-            aria-label="Минуты"
-            className="h-12 w-16 justify-center px-2 text-base"
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent position="popper" className="min-w-0">
-            {minutes.map((minute) => (
-              <SelectItem key={minute} value={pad(minute)}>
-                {pad(minute)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent position="popper" className="min-w-0">
+          {minutes.map((value) => (
+            <SelectItem key={value} value={pad(value)}>
+              {pad(value)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   );
 }

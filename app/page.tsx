@@ -63,10 +63,8 @@ import {
   errorText,
   fullLabel,
   isOverdue,
-  nextDue,
+  pushLabel,
   relativeLabel,
-  reminderLabel,
-  repeatLabel,
   timeLabel,
 } from "@/lib/deadlines";
 import { supabase } from "@/lib/supabase";
@@ -103,8 +101,9 @@ export default function Home() {
 
   const inScope = (task: Task) =>
     scope === "personal" ? !task.group_id : task.group_id === group?.id;
+  // Истёк срок — задание уходит в архив само. Никаких переносов.
   const isArchived = (task: Task) =>
-    task.completed || data.hidden.includes(task.id);
+    task.completed || data.hidden.includes(task.id) || isOverdue(task);
   const scoped = data.tasks.filter(inScope);
   const visible = scoped
     .filter((task) => (archive ? isArchived(task) : !isArchived(task)))
@@ -118,11 +117,6 @@ export default function Home() {
     (all[day] ??= []).push(task);
     return all;
   }, {});
-  // Повторяющееся своё задание не уходит в архив, а переезжает на следующий раз.
-  const selectedNext =
-    selected && data.isMine(selected) && !isArchived(selected)
-      ? nextDue(selected.due_at, selected.repeat_rule)
-      : null;
   const busyDates = scoped
     .filter((task) => !isArchived(task))
     .map((task) => new Date(task.due_at));
@@ -141,11 +135,14 @@ export default function Home() {
       due_at: values.due.toISOString(),
       reminder_minutes: Number(values.reminder),
       repeat_rule: values.repeat,
+      repeat_time: values.repeat === "none" ? null : values.repeatTime,
       notes: values.notes.trim(),
     };
     try {
       if (editing) {
         await data.updateTask(editing.id, payload);
+        if (values.due > new Date() && isArchived(editing))
+          await data.restore(editing.id, true);
         setSelected((current) =>
           current?.id === editing.id ? { ...current, ...payload } : current,
         );
@@ -473,7 +470,7 @@ export default function Home() {
                 </EmptyTitle>
                 <EmptyDescription>
                   {archive
-                    ? "Сюда попадают убранные задания. Ничего не удаляется само."
+                    ? "Сюда уходят задания после срока и те, что ты убрал. Ничего не удаляется само."
                     : scope === "group"
                       ? "Добавь первое задание — его увидит вся группа."
                       : "Здесь задания только для тебя."}
@@ -513,7 +510,7 @@ export default function Home() {
                               {task.repeat_rule !== "none" && (
                                 <span className="flex items-center gap-1">
                                   <Repeat className="size-3" />
-                                  {repeatLabel(task.repeat_rule)}
+                                  {pushLabel(task)}
                                 </span>
                               )}
                             </p>
@@ -536,22 +533,28 @@ export default function Home() {
                             size="icon"
                             className="size-11 shrink-0 text-muted-foreground"
                             aria-label={
-                              archive
-                                ? `Вернуть ${task.title}`
-                                : task.group_id
+                              !archive
+                                ? task.group_id
                                   ? `Убрать у себя: ${task.title}`
                                   : `Убрать в архив: ${task.title}`
+                                : isOverdue(task)
+                                  ? `Новый срок: ${task.title}`
+                                  : `Вернуть ${task.title}`
                             }
                             onClick={() =>
-                              archive
-                                ? void data.restore(task.id)
-                                : void data.archive(task)
+                              !archive
+                                ? void data.archive(task)
+                                : isOverdue(task)
+                                  ? openForm(task)
+                                  : void data.restore(task.id)
                             }
                           >
-                            {archive ? (
-                              <RotateCcw className="size-5" />
-                            ) : (
+                            {!archive ? (
                               <Check className="size-5" />
+                            ) : isOverdue(task) ? (
+                              <Pencil className="size-5" />
+                            ) : (
+                              <RotateCcw className="size-5" />
                             )}
                           </Button>
                         </ItemActions>
@@ -624,7 +627,7 @@ export default function Home() {
               {selected.repeat_rule !== "none" && (
                 <Badge variant="outline">
                   <Repeat />
-                  {repeatLabel(selected.repeat_rule)}
+                  {pushLabel(selected)}
                 </Badge>
               )}
               <span className="text-sm text-muted-foreground">
@@ -637,14 +640,12 @@ export default function Home() {
               </p>
             )}
             <p className="text-sm text-muted-foreground">
-              Push: {reminderLabel(selected.reminder_minutes)}
-              {selected.repeat_rule !== "none" &&
-                `, затем ${repeatLabel(selected.repeat_rule)}`}
+              Push: {pushLabel(selected)}
             </p>
             <Separator />
             <p className="text-sm text-muted-foreground">
-              {selectedNext
-                ? `Отметка «выполнено» перенесёт напоминание на ${fullLabel(selectedNext)}. Ничего не удаляется.`
+              {isOverdue(selected)
+                ? "Срок прошёл, задание лежит в архиве. Поставь новый срок, чтобы вернуть его в список."
                 : selected.group_id
                   ? "«Убрать» скроет задание только у тебя на этом устройстве — у группы оно останется."
                   : "«Убрать» отправит задание в архив. Оттуда его всегда можно вернуть."}
@@ -664,30 +665,24 @@ export default function Home() {
                   Изменить
                 </Button>
               )}
-              <Button
-                variant="secondary"
-                className="h-12 w-full"
-                onClick={() => {
-                  if (isArchived(selected)) void data.restore(selected.id);
-                  else void data.archive(selected);
-                  setSelected(null);
-                }}
-              >
-                {isArchived(selected) ? (
-                  <RotateCcw />
-                ) : selectedNext ? (
-                  <Check />
-                ) : (
-                  <Archive />
-                )}
-                {isArchived(selected)
-                  ? "Вернуть в список"
-                  : selectedNext
-                    ? "Выполнено на этот раз"
+              {!isOverdue(selected) && (
+                <Button
+                  variant="secondary"
+                  className="h-12 w-full"
+                  onClick={() => {
+                    if (isArchived(selected)) void data.restore(selected.id);
+                    else void data.archive(selected);
+                    setSelected(null);
+                  }}
+                >
+                  {isArchived(selected) ? <RotateCcw /> : <Archive />}
+                  {isArchived(selected)
+                    ? "Вернуть в список"
                     : selected.group_id
                       ? "Убрать у себя"
                       : "Убрать в архив"}
-              </Button>
+                </Button>
+              )}
               {data.isMine(selected) && (
                 <Button
                   variant="ghost"
@@ -837,8 +832,8 @@ export default function Home() {
           </Button>
           <p className="flex gap-2 text-sm text-muted-foreground">
             <Info className="mt-0.5 size-4 shrink-0" />
-            Просроченные задания никуда не пропадают: они остаются в списке, а
-            убранные лежат в архиве, пока ты сам их не удалишь.
+            После срока задание уходит в архив и лежит там, пока ты сам его не
+            удалишь. Чтобы вернуть в список, поставь новый срок.
           </p>
           <p className="text-sm text-muted-foreground">
             {data.cloud

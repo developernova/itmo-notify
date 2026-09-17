@@ -9,8 +9,6 @@ import {
   localGroup,
   exampleTasks,
   errorText,
-  fullLabel,
-  nextDue,
 } from "@/lib/deadlines";
 
 const TASKS_KEY = "srok-tasks";
@@ -79,41 +77,6 @@ export function useDeadlines() {
     };
   }, []);
 
-  /**
-   * Повторяющееся задание не «протухает»: через 10 минут после срока оно
-   * переезжает на следующий раз. Чужие групповые сдвинет cron на сервере.
-   */
-  const rollRepeats = useCallback(async (list: Task[], uid: string | null) => {
-    const cutoff = new Date(Date.now() - 10 * 60000);
-    const moved: { id: string; due_at: string }[] = [];
-    const next = list.map((task) => {
-      if (task.repeat_rule === "none" || task.completed) return task;
-      if (new Date(task.due_at) > cutoff) return task;
-      if (uid && task.user_id && task.user_id !== uid) return task;
-      const upcoming = nextDue(task.due_at, task.repeat_rule);
-      if (!upcoming) return task;
-      moved.push({ id: task.id, due_at: upcoming.toISOString() });
-      return { ...task, due_at: upcoming.toISOString() };
-    });
-    if (!moved.length) return list;
-    try {
-      if (uid && supabase)
-        await Promise.all(
-          moved.map((task) =>
-            supabase!
-              .from("tasks")
-              .update({ due_at: task.due_at })
-              .eq("id", task.id),
-          ),
-        );
-      else localStorage.setItem(TASKS_KEY, JSON.stringify(next));
-    } catch (e) {
-      toast.error(errorText(e));
-      return list;
-    }
-    return next;
-  }, []);
-
   const refresh = useCallback(async () => {
     if (!ready) return;
     const uid = user?.id ?? null;
@@ -128,7 +91,7 @@ export function useDeadlines() {
         if (identity.current !== uid) return;
         if (taskRows.error) throw taskRows.error;
         if (groupRows.error) throw groupRows.error;
-        setTasks(await rollRepeats(taskRows.data ?? [], user.id));
+        setTasks(taskRows.data ?? []);
         setGroups(groupRows.data ?? []);
         setGroupId((current) =>
           groupRows.data?.some((g) => g.id === current)
@@ -140,14 +103,12 @@ export function useDeadlines() {
           localStorage.getItem(TASKS_KEY) || "[]",
         ) as Task[];
         setTasks(
-          await rollRepeats(
-            stored.map((t) => ({
-              ...t,
-              group_id: t.group_id ?? null,
-              repeat_rule: t.repeat_rule ?? "none",
-            })),
-            null,
-          ),
+          stored.map((t) => ({
+            ...t,
+            group_id: t.group_id ?? null,
+            repeat_rule: t.repeat_rule ?? "none",
+            repeat_time: t.repeat_time ?? null,
+          })),
         );
         const demo = localStorage.getItem(DEMO_KEY) === "true";
         setGroups(demo ? [localGroup] : []);
@@ -158,7 +119,7 @@ export function useDeadlines() {
     } finally {
       setLoading(false);
     }
-  }, [ready, user, rollRepeats]);
+  }, [ready, user]);
 
   useEffect(() => {
     if (!ready) return;
@@ -239,27 +200,9 @@ export function useDeadlines() {
    * «Убрать» ничего не удаляет. Личное задание уходит в архив отметкой
    * completed, общее — только скрывается на этом устройстве, у группы остаётся.
    */
+  /** Ничего не удаляет и никуда не переносит: личное в архив, общее — скрыть у себя. */
   async function archive(task: Task) {
     try {
-      const upcoming =
-        isMine(task) && !task.completed
-          ? nextDue(task.due_at, task.repeat_rule)
-          : null;
-      if (upcoming) {
-        const previous = task.due_at;
-        await updateTask(task.id, { due_at: upcoming.toISOString() });
-        toast.success("Готово. Следующее напоминание:", {
-          description: fullLabel(upcoming),
-          action: {
-            label: "Отменить",
-            onClick: () =>
-              void updateTask(task.id, { due_at: previous }).catch((e) =>
-                toast.error(errorText(e)),
-              ),
-          },
-        });
-        return;
-      }
       if (task.group_id)
         await setHiddenIds([...new Set([...hiddenRef.current, task.id])]);
       else await setCompleted(task, true);
@@ -272,13 +215,13 @@ export function useDeadlines() {
     }
   }
 
-  async function restore(id: string) {
+  async function restore(id: string, silent = false) {
     try {
       const task = tasksRef.current.find((t) => t.id === id);
       if (task?.completed) await setCompleted(task, false);
       if (hiddenRef.current.includes(id))
         await setHiddenIds(hiddenRef.current.filter((x) => x !== id));
-      toast.success("Задание снова в списке");
+      if (!silent) toast.success("Задание снова в списке");
     } catch (e) {
       toast.error(errorText(e));
     }

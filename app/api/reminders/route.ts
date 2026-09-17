@@ -22,15 +22,10 @@ export async function GET(req: Request) {
       try {
         const { data: current } = await db
           .from("tasks")
-          .select("completed,due_at,reminder_minutes,notification_claimed_at")
+          .select("completed,due_at")
           .eq("id", task.task_id)
           .single();
-        if (
-          !current ||
-          current.completed ||
-          current.due_at !== task.due_at ||
-          current.reminder_minutes !== task.reminder_minutes
-        )
+        if (!current || current.completed || current.due_at !== task.due_at)
           continue;
         const count = await deliver(task.user_id, {
           title: task.title,
@@ -46,7 +41,7 @@ export async function GET(req: Request) {
           })
           .eq("task_id", task.task_id)
           .eq("user_id", task.user_id)
-          .eq("claimed_at", task.claimed_at);
+          .eq("slot", task.slot);
         if (updateError) throw updateError;
         sent++;
       } catch {
@@ -56,12 +51,10 @@ export async function GET(req: Request) {
           .update({ claimed_at: null })
           .eq("task_id", task.task_id)
           .eq("user_id", task.user_id)
-          .eq("claimed_at", task.claimed_at);
+          .eq("slot", task.slot);
       }
     }
-    // Сдвиг повторов — после рассылки: текущее напоминание уже ушло.
-    const { data: rolled } = await db.rpc("roll_repeating_tasks");
-    return Response.json({ sent, failed, rolled: rolled ?? null });
+    return Response.json({ sent, failed });
   } catch {
     return Response.json(
       { error: "Reminder processing failed" },

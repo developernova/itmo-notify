@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { DateTimePicker } from "@/components/date-time-picker";
+import { DateTimePicker, TimeFields } from "@/components/date-time-picker";
 import { Task, defaultDue, reminders, repeats } from "@/lib/deadlines";
 
 export type TaskValues = {
@@ -27,8 +27,15 @@ export type TaskValues = {
   due: Date;
   reminder: string;
   repeat: string;
+  /** «20:00», время повтора push. */
+  repeatTime: string;
   notes: string;
   scope: "group" | "personal";
+};
+
+const defaultTime = (task?: Task | null) => {
+  const due = task ? new Date(task.due_at) : defaultDue();
+  return `${String(due.getHours()).padStart(2, "0")}:${String(due.getMinutes()).padStart(2, "0")}`;
 };
 
 export function TaskForm({
@@ -53,6 +60,7 @@ export function TaskForm({
     due: task ? new Date(task.due_at) : defaultDue(),
     reminder: String(task?.reminder_minutes ?? 1440),
     repeat: task?.repeat_rule ?? "none",
+    repeatTime: (task?.repeat_time ?? "").slice(0, 5) || defaultTime(task),
     notes: task?.notes ?? "",
     scope: task ? (task.group_id ? "group" : "personal") : scope,
   });
@@ -120,47 +128,61 @@ export function TaskForm({
           />
         </Field>
         <Field>
-          <FieldLabel htmlFor="repeat">Повторять push</FieldLabel>
-          <Select
-            value={values.repeat}
-            onValueChange={(repeat) => set({ repeat })}
-          >
-            <SelectTrigger id="repeat" className="h-12 w-full text-base">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent position="popper">
-              {repeats.map((repeat) => (
-                <SelectItem key={repeat.value} value={repeat.value}>
-                  {repeat.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <FieldLabel htmlFor="repeat">Push-уведомление</FieldLabel>
+          <div className="flex gap-2">
+            <Select
+              value={values.repeat}
+              onValueChange={(repeat) => set({ repeat })}
+            >
+              <SelectTrigger
+                id="repeat"
+                className="h-12 min-w-0 flex-1 text-base"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent position="popper">
+                {repeats.map((repeat) => (
+                  <SelectItem key={repeat.value} value={repeat.value}>
+                    {repeat.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {values.repeat === "none" ? (
+              <Select
+                value={values.reminder}
+                onValueChange={(reminder) => set({ reminder })}
+              >
+                <SelectTrigger
+                  aria-label="За сколько до срока"
+                  className="h-12 min-w-0 flex-1 text-base"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent position="popper">
+                  {reminders.map((reminder) => (
+                    <SelectItem key={reminder.value} value={reminder.value}>
+                      {reminder.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <TimeFields
+                hour={Number(values.repeatTime.slice(0, 2))}
+                minute={Number(values.repeatTime.slice(3, 5))}
+                onChange={(hour, minute) =>
+                  set({
+                    repeatTime: `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`,
+                  })
+                }
+              />
+            )}
+          </div>
           <FieldDescription>
-            «Каждый день» — push будет приходить каждый день, пока задание не
-            удалишь. Задание остаётся в списке и само переезжает на следующий
-            раз.
-          </FieldDescription>
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="reminder">За сколько до срока</FieldLabel>
-          <Select
-            value={values.reminder}
-            onValueChange={(reminder) => set({ reminder })}
-          >
-            <SelectTrigger id="reminder" className="h-12 w-full text-base">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent position="popper">
-              {reminders.map((reminder) => (
-                <SelectItem key={reminder.value} value={reminder.value}>
-                  {reminder.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <FieldDescription>
-            Когда прислать push. Нужны включённые уведомления на устройстве.
+            {values.repeat === "none"
+              ? "Придёт один раз перед сроком."
+              : "Время по Москве. Push приходит до срока, потом задание уходит в архив."}
           </FieldDescription>
         </Field>
         <Field>

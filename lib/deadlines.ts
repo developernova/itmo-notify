@@ -10,6 +10,8 @@ export type Task = {
   completed: boolean;
   priority: string;
   repeat_rule: string;
+  /** Время повтора push по Москве, «20:00». У разовых заданий — null. */
+  repeat_time: string | null;
 };
 export type StudyGroup = { id: string; name: string; invite_code: string };
 
@@ -36,27 +38,10 @@ export const repeats = [
   { value: "daily", label: "Каждый день", short: "каждый день" },
   { value: "weekdays", label: "По будням, пн–пт", short: "по будням" },
   { value: "weekly", label: "Каждую неделю", short: "каждую неделю" },
-  { value: "monthly", label: "Каждый месяц", short: "каждый месяц" },
 ];
 
 export const repeatLabel = (rule: string) =>
   repeats.find((r) => r.value === rule)?.short ?? "";
-
-/** Ближайший повтор строго после `after`; для разовых заданий — null. */
-export function nextDue(from: string | Date, rule: string, after = new Date()) {
-  if (!rule || rule === "none") return null;
-  const next = new Date(from);
-  for (let guard = 0; guard < 500; guard++) {
-    if (rule === "weekly") next.setDate(next.getDate() + 7);
-    else if (rule === "monthly") next.setMonth(next.getMonth() + 1);
-    else next.setDate(next.getDate() + 1);
-    if (rule === "weekdays")
-      while (next.getDay() === 0 || next.getDay() === 6)
-        next.setDate(next.getDate() + 1);
-    if (next > after) return next;
-  }
-  return null;
-}
 
 export const reminderLabel = (minutes: number) =>
   reminders.find((r) => r.value === String(minutes))?.short ?? "в срок";
@@ -81,6 +66,7 @@ export function exampleTasks(): Task[] {
       completed: false,
       priority: "normal",
       repeat_rule: "none",
+      repeat_time: null,
     };
   });
 }
@@ -93,6 +79,21 @@ export function defaultDue() {
 }
 
 export const isOverdue = (task: Task) => new Date(task.due_at) < new Date();
+
+/** Одна строка про push: «каждый день в 20:00» или «за час». */
+export function pushLabel(
+  task: Pick<
+    Task,
+    "due_at" | "reminder_minutes" | "repeat_rule" | "repeat_time"
+  >,
+) {
+  if (task.repeat_rule === "none" || !task.repeat_time)
+    return reminderLabel(task.reminder_minutes);
+  const time = task.repeat_time.slice(0, 5);
+  if (task.repeat_rule === "weekly")
+    return `каждый ${new Date(task.due_at).toLocaleDateString("ru", { weekday: "long" })} в ${time}`;
+  return `${repeatLabel(task.repeat_rule)} в ${time}`;
+}
 
 /** Просроченные собираются вместе сверху и остаются в списке, пока их не уберут. */
 export function dayLabel(value: string) {
