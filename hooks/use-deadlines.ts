@@ -60,8 +60,11 @@ export function useDeadlines() {
       if (!session) {
         const anonymous = await client.auth.signInAnonymously();
         if (anonymous.error && active)
+          // Отдельная подсказка только для реально частой причины; остальное — как есть.
           setAuthError(
-            "Облако недоступно: включи Anonymous sign-ins в Supabase → Authentication.",
+            /anonymous|disabled/i.test(anonymous.error.message)
+              ? "Облако недоступно: в Supabase включи Authentication → Sign In / Providers → Anonymous sign-ins."
+              : `Облако недоступно: ${errorText(anonymous.error)}`,
           );
         session = anonymous.data.session;
       }
