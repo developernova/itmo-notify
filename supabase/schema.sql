@@ -197,15 +197,20 @@ grant execute on function public.roll_repeating_tasks() to service_role;
 drop function if exists public.roll_repeating_tasks();
 drop function if exists public.next_due(timestamptz,text);
 update public.tasks set repeat_rule='none' where repeat_rule not in ('none','daily','weekdays','weekly');
-alter table public.tasks drop constraint tasks_repeat_rule_check;
+alter table public.tasks drop constraint if exists tasks_repeat_rule_check;
 alter table public.tasks add constraint tasks_repeat_rule_check
  check(repeat_rule in ('none','daily','weekdays','weekly'));
 -- Время повтора задаётся пользователем и считается по Москве, как и подпись в push.
-alter table public.tasks add column repeat_time time;
+alter table public.tasks add column if not exists repeat_time time;
+-- Повторы из прошлой версии времени не знали: берём время срока по Москве.
+update public.tasks set repeat_time=(due_at at time zone 'Europe/Moscow')::time
+ where repeat_rule<>'none' and repeat_time is null;
+update public.tasks set repeat_time=null where repeat_rule='none' and repeat_time is not null;
+alter table public.tasks drop constraint if exists tasks_repeat_time_set;
 alter table public.tasks add constraint tasks_repeat_time_set
  check((repeat_rule='none')=(repeat_time is null));
 -- Момент, когда push должен уйти: ближайший прошедший слот по правилу повтора.
-create function public.reminder_slot(due timestamptz, mins integer, rule text, at_time time) returns timestamptz
+create or replace function public.reminder_slot(due timestamptz, mins integer, rule text, at_time time) returns timestamptz
 language plpgsql stable set search_path=public as $$
 declare day date; slot timestamptz; due_dow integer;
 begin
@@ -226,8 +231,8 @@ begin
  return null;
 end; $$;
 -- Доставка учитывается по слоту: у повтора их много, у разового один.
-drop function public.claim_reminders();
-drop table public.reminder_deliveries;
+drop function if exists public.claim_reminders();
+drop table if exists public.reminder_deliveries;
 create table public.reminder_deliveries (
  task_id uuid not null references public.tasks(id) on delete cascade,
  user_id uuid not null references auth.users(id) on delete cascade,
