@@ -25,7 +25,7 @@ await assert.rejects(()=>db.query('update tasks set group_id=null where id=$1',[
 await assert.rejects(()=>db.query('update tasks set user_id=$2 where id=$1',[shared,b]),/не меняются/);
 const throwaway=(await db.query(`insert into tasks(user_id,group_id,title,subject,due_at,reminder_minutes) values($1,$2,'Опечатка','Тест',now()+interval '1 day',10080) returning id`,[a,group.id])).rows[0].id;
 assert.equal((await db.query('delete from tasks where id=$1 returning id',[throwaway])).rows.length,1,'author deletes own shared task');
-await assert.rejects(()=>db.query(`insert into tasks(user_id,title,subject,due_at,reminder_minutes) values($1,'Чужой интервал','Тест',now(),7)`,[a]),/reminder_minutes/);
+await assert.rejects(()=>db.query(`insert into tasks(user_id,title,subject,due_at,reminder_offsets) values($1,'Чужой интервал','Тест',now(),'{7}')`,[a]),/reminder_offsets/);
 assert.equal((await db.query("update tasks set completed=true where id=$1 returning id",[personal])).rows.length,1,'personal task goes to archive');
 await db.query('update tasks set completed=false where id=$1',[personal]);
 assert.equal((await db.query('select * from tasks')).rows.length,3);
@@ -38,6 +38,15 @@ assert(claimed.some(r=>r.task_id===personal&&r.user_id===a));
 assert.equal((await db.query('select * from claim_reminders()')).rows.length,0,'locked deliveries cannot be reclaimed');
 await db.exec('update reminder_deliveries set sent_at=now(),claimed_at=null');
 assert.equal((await db.query('select * from claim_reminders()')).rows.length,0,'sent reminders cannot be duplicated');
+// несколько напоминаний на одно задание дают несколько слотов
+await as(a);
+const many=(await db.query(`insert into tasks(user_id,title,subject,due_at,reminder_offsets) values($1,'Курсовая','Программирование',now()+interval '50 minutes','{0,60,1440}') returning id`,[a])).rows[0].id;
+await db.exec('reset role');
+const slots=(await db.query('select * from claim_reminders()')).rows.filter(r=>r.task_id===many);
+assert.equal(slots.length,2,'уже наступившие напоминания за день и за час взяты, «в срок» ещё нет');
+assert.equal((await db.query('select * from claim_reminders()')).rows.filter(r=>r.task_id===many).length,0,'каждый слот забирается один раз');
+await db.query('delete from tasks where id=$1',[many]);
+
 // повтор — это расписание push, срок при этом не двигается
 await as(a);
 const dueAt=(await db.query('select due_at from tasks where id=$1',[personal])).rows[0].due_at;
@@ -56,4 +65,4 @@ await db.query('delete from tasks where id=$1',[daily]);
 await db.exec('update reminder_deliveries set sent_at=now(),claimed_at=null');
 await as(a);await db.query("update tasks set due_at=now()+interval '35 minutes' where id=$1",[personal]);
 await db.exec('reset role');assert.equal((await db.query('select * from claim_reminders()')).rows.length,1,'rescheduled personal deadline is eligible again');
-await db.close();console.log('PASS: group membership, personal isolation, member creation, author-only editing, immutable owner and group, archive flag, per-recipient delivery, device hiding, retry locks, repeating push slots and rescheduling.');
+await db.close();console.log('PASS: group membership, personal isolation, member creation, author-only editing, immutable owner and group, archive flag, per-recipient delivery, device hiding, retry locks, repeating push slots, multiple reminders and rescheduling.');

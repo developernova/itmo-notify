@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   Bell,
   BellOff,
+  BookOpen,
   CalendarDays,
   Check,
   ChevronDown,
@@ -61,10 +62,12 @@ import {
   Task,
   dayLabel,
   errorText,
+  canonicalSubject,
   fullLabel,
   isOverdue,
   pushLabel,
   relativeLabel,
+  subjectList,
   timeLabel,
 } from "@/lib/deadlines";
 import { supabase } from "@/lib/supabase";
@@ -83,6 +86,8 @@ export default function Home() {
   const [groupInput, setGroupInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [push, setPush] = useState(false);
+  const [subject, setSubject] = useState("");
+  const [groupBy, setGroupBy] = useState<"date" | "subject">("date");
   const group = data.groups.find((g) => g.id === data.groupId);
 
   useEffect(() => {
@@ -105,16 +110,22 @@ export default function Home() {
   const isArchived = (task: Task) =>
     task.completed || data.hidden.includes(task.id) || isOverdue(task);
   const scoped = data.tasks.filter(inScope);
-  const visible = scoped
-    .filter((task) => (archive ? isArchived(task) : !isArchived(task)))
+  const inView = scoped.filter((task) =>
+    archive ? isArchived(task) : !isArchived(task),
+  );
+  const subjects = subjectList(inView);
+  const picked = subjects.includes(subject) ? subject : "";
+  const visible = inView
+    .filter((task) => !picked || task.subject === picked)
     .sort(
       (a, b) =>
         (+new Date(a.due_at) - +new Date(b.due_at)) * (archive ? -1 : 1),
     );
   const archivedCount = scoped.filter(isArchived).length;
+  // Порядок секций задаёт сам список: он уже отсортирован по сроку.
   const buckets = visible.reduce<Record<string, Task[]>>((all, task) => {
-    const day = dayLabel(task.due_at);
-    (all[day] ??= []).push(task);
+    const key = groupBy === "subject" ? task.subject : dayLabel(task.due_at);
+    (all[key] ??= []).push(task);
     return all;
   }, {});
   const busyDates = scoped
@@ -131,9 +142,11 @@ export default function Home() {
     setBusy(true);
     const payload = {
       title: values.title.trim(),
-      subject: values.subject.trim() || "Без предмета",
+      subject:
+        canonicalSubject(values.subject, subjectList(data.tasks)) ||
+        "Без предмета",
       due_at: values.due.toISOString(),
-      reminder_minutes: Number(values.reminder),
+      reminder_offsets: values.offsets,
       repeat_rule: values.repeat,
       repeat_time: values.repeat === "none" ? null : values.repeatTime,
       notes: values.notes.trim(),
@@ -397,7 +410,7 @@ export default function Home() {
               setArchive(false);
             }}
           >
-            <TabsList className="mb-7 h-12! w-full">
+            <TabsList className="mb-5 h-12! w-full">
               <TabsTrigger value="group" className="text-base">
                 <Users />
                 Группа
@@ -408,6 +421,40 @@ export default function Home() {
               </TabsTrigger>
             </TabsList>
           </Tabs>
+
+          {subjects.length > 1 && (
+            <div className="mb-5 flex items-center gap-2">
+              <div className="-mx-5 flex flex-1 gap-1.5 overflow-x-auto px-5 pb-1 sm:mx-0 sm:px-0">
+                {["", ...subjects].map((name) => (
+                  <Button
+                    key={name || "all"}
+                    variant={picked === name ? "secondary" : "ghost"}
+                    size="sm"
+                    className="h-9 shrink-0 px-3 font-normal"
+                    onClick={() => setSubject(name)}
+                  >
+                    {name || "Все"}
+                  </Button>
+                ))}
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-9 shrink-0 px-3 font-normal text-muted-foreground"
+                aria-label={
+                  groupBy === "date"
+                    ? "Группировать по предмету"
+                    : "Группировать по дате"
+                }
+                onClick={() =>
+                  setGroupBy(groupBy === "date" ? "subject" : "date")
+                }
+              >
+                {groupBy === "date" ? <CalendarDays /> : <BookOpen />}
+                {groupBy === "date" ? "по дате" : "по предмету"}
+              </Button>
+            </div>
+          )}
 
           {!data.cloud && (
             <p className="mb-5 text-sm text-muted-foreground">
@@ -505,22 +552,28 @@ export default function Home() {
                           onClick={() => setSelected(task)}
                         >
                           <div className="min-w-0 space-y-2">
-                            <p className="flex flex-wrap items-center gap-x-2 text-sm font-normal text-muted-foreground">
-                              {task.subject}
-                              {task.repeat_rule !== "none" && (
-                                <span className="flex items-center gap-1">
-                                  <Repeat className="size-3" />
-                                  {pushLabel(task)}
-                                </span>
-                              )}
-                            </p>
+                            {(groupBy !== "subject" ||
+                              task.repeat_rule !== "none") && (
+                              <p className="flex flex-wrap items-center gap-x-2 text-sm font-normal text-muted-foreground">
+                                {groupBy === "subject" ? "" : task.subject}
+                                {task.repeat_rule !== "none" && (
+                                  <span className="flex items-center gap-1">
+                                    <Repeat className="size-3" />
+                                    {pushLabel(task)}
+                                  </span>
+                                )}
+                              </p>
+                            )}
                             <h3 className="text-base leading-snug font-medium break-words">
                               {task.title}
                             </h3>
                             <p
                               className={`text-sm font-normal ${isOverdue(task) ? "text-destructive" : "text-muted-foreground"}`}
                             >
-                              {timeLabel(task.due_at)} ·{" "}
+                              {groupBy === "subject"
+                                ? fullLabel(task.due_at)
+                                : timeLabel(task.due_at)}{" "}
+                              ·{" "}
                               {isOverdue(task)
                                 ? `срок прошёл ${relativeLabel(task.due_at)}`
                                 : relativeLabel(task.due_at)}
@@ -604,6 +657,7 @@ export default function Home() {
           scope={group ? scope : "personal"}
           groupName={group?.name}
           busyDates={busyDates}
+          subjects={subjectList(data.tasks)}
           busy={busy}
           onSubmit={submitTask}
         />

@@ -5,7 +5,10 @@ export type Task = {
   title: string;
   subject: string;
   due_at: string;
-  reminder_minutes: number;
+  /** Минуты до срока, за сколько слать push. Пусто — уведомлений нет. */
+  reminder_offsets: number[];
+  /** Легаси одного напоминания: колонка осталась в базе, но не читается. */
+  reminder_minutes?: number;
   notes: string;
   completed: boolean;
   priority: string;
@@ -22,15 +25,28 @@ export const localGroup = {
 };
 
 // Values must stay in sync with the reminder_minutes check constraint.
+// Значения должны совпадать с check-ограничением reminder_offsets.
 export const reminders = [
-  { value: "0", label: "В момент дедлайна", short: "в срок" },
-  { value: "10", label: "За 10 минут", short: "за 10 минут" },
-  { value: "60", label: "За час", short: "за час" },
-  { value: "180", label: "За 3 часа", short: "за 3 часа" },
-  { value: "1440", label: "За день", short: "за день" },
-  { value: "4320", label: "За 3 дня", short: "за 3 дня" },
-  { value: "10080", label: "За неделю", short: "за неделю" },
+  { value: 0, label: "В момент дедлайна", chip: "в срок" },
+  { value: 10, label: "За 10 минут", chip: "за 10 мин" },
+  { value: 60, label: "За час", chip: "за час" },
+  { value: 180, label: "За 3 часа", chip: "за 3 часа" },
+  { value: 1440, label: "За день", chip: "за день" },
+  { value: 4320, label: "За 3 дня", chip: "за 3 дня" },
+  { value: 10080, label: "За неделю", chip: "за неделю" },
 ];
+
+export const reminderChip = (minutes: number) =>
+  reminders.find((r) => r.value === minutes)?.chip ?? `за ${minutes} мин`;
+
+/** «за 3 дня, за день и за час» — человеческий список напоминаний. */
+export function offsetsLabel(offsets: number[]) {
+  if (!offsets.length) return "без уведомлений";
+  const parts = [...offsets].sort((a, b) => b - a).map(reminderChip);
+  return parts.length === 1
+    ? parts[0]
+    : `${parts.slice(0, -1).join(", ")} и ${parts[parts.length - 1]}`;
+}
 
 // Значения должны совпадать с check-ограничением repeat_rule.
 export const repeats = [
@@ -42,9 +58,6 @@ export const repeats = [
 
 export const repeatLabel = (rule: string) =>
   repeats.find((r) => r.value === rule)?.short ?? "";
-
-export const reminderLabel = (minutes: number) =>
-  reminders.find((r) => r.value === String(minutes))?.short ?? "в срок";
 
 export function exampleTasks(): Task[] {
   return [
@@ -61,7 +74,7 @@ export function exampleTasks(): Task[] {
       title: String(title),
       subject: String(subject),
       due_at: date.toISOString(),
-      reminder_minutes: 1440,
+      reminder_offsets: [1440],
       notes: "",
       completed: false,
       priority: "normal",
@@ -84,11 +97,11 @@ export const isOverdue = (task: Task) => new Date(task.due_at) < new Date();
 export function pushLabel(
   task: Pick<
     Task,
-    "due_at" | "reminder_minutes" | "repeat_rule" | "repeat_time"
+    "due_at" | "reminder_offsets" | "repeat_rule" | "repeat_time"
   >,
 ) {
   if (task.repeat_rule === "none" || !task.repeat_time)
-    return reminderLabel(task.reminder_minutes);
+    return offsetsLabel(task.reminder_offsets);
   const time = task.repeat_time.slice(0, 5);
   if (task.repeat_rule === "weekly")
     return `каждый ${new Date(task.due_at).toLocaleDateString("ru", { weekday: "long" })} в ${time}`;
@@ -144,6 +157,28 @@ export function relativeLabel(value: string) {
   for (const [nextUnit, nextSize] of units)
     if (Math.abs(diff) >= nextSize) [unit, size] = [nextUnit, nextSize];
   return format.format(Math.round(diff / size), unit);
+}
+
+/** Предметы из заданий: без повторов по регистру, частые выше. */
+export function subjectList(tasks: Task[]) {
+  const seen = new Map<string, { name: string; count: number }>();
+  for (const task of tasks) {
+    const name = task.subject.trim();
+    if (!name || name === "Без предмета") continue;
+    const key = name.toLowerCase();
+    const found = seen.get(key);
+    if (found) found.count++;
+    else seen.set(key, { name, count: 1 });
+  }
+  return [...seen.values()]
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "ru"))
+    .map((s) => s.name);
+}
+
+/** Подтягивает ввод к известному написанию, чтобы не плодить «матан» и «Матанализ». */
+export function canonicalSubject(value: string, known: string[]) {
+  const name = value.trim();
+  return known.find((k) => k.toLowerCase() === name.toLowerCase()) ?? name;
 }
 
 export const errorText = (error: unknown) =>

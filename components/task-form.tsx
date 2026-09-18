@@ -19,13 +19,22 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { DateTimePicker, TimeFields } from "@/components/date-time-picker";
-import { Task, defaultDue, reminders, repeats } from "@/lib/deadlines";
+import { Badge } from "@/components/ui/badge";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import {
+  Task,
+  defaultDue,
+  offsetsLabel,
+  reminders,
+  repeats,
+} from "@/lib/deadlines";
 
 export type TaskValues = {
   title: string;
   subject: string;
   due: Date;
-  reminder: string;
+  /** Минуты до срока: сколько напоминаний, столько и push. */
+  offsets: number[];
   repeat: string;
   /** «20:00», время повтора push. */
   repeatTime: string;
@@ -43,6 +52,7 @@ export function TaskForm({
   scope,
   groupName,
   busyDates,
+  subjects = [],
   busy,
   onSubmit,
 }: {
@@ -50,6 +60,7 @@ export function TaskForm({
   scope: "group" | "personal";
   groupName?: string;
   busyDates?: Date[];
+  subjects?: string[];
   busy: boolean;
   onSubmit: (values: TaskValues) => void;
 }) {
@@ -58,7 +69,7 @@ export function TaskForm({
     subject:
       task?.subject && task.subject !== "Без предмета" ? task.subject : "",
     due: task ? new Date(task.due_at) : defaultDue(),
-    reminder: String(task?.reminder_minutes ?? 1440),
+    offsets: task?.reminder_offsets ?? [1440],
     repeat: task?.repeat_rule ?? "none",
     repeatTime: (task?.repeat_time ?? "").slice(0, 5) || defaultTime(task),
     notes: task?.notes ?? "",
@@ -66,6 +77,11 @@ export function TaskForm({
   });
   const set = (patch: Partial<TaskValues>) =>
     setValues((current) => ({ ...current, ...patch }));
+  // Подсказываем уже заведённые предметы, пока пользователь не набрал точное совпадение.
+  const query = values.subject.trim().toLowerCase();
+  const hints = subjects
+    .filter((s) => s.toLowerCase() !== query && s.toLowerCase().includes(query))
+    .slice(0, 5);
 
   return (
     <form
@@ -114,10 +130,27 @@ export function TaskForm({
             id="subject"
             className="h-12 text-base"
             maxLength={80}
+            autoComplete="off"
             value={values.subject}
             onChange={(e) => set({ subject: e.target.value })}
             placeholder="Программирование"
           />
+          {hints.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {hints.map((subject) => (
+                <Badge
+                  key={subject}
+                  asChild
+                  variant="outline"
+                  className="h-8 cursor-pointer px-3 text-sm font-normal hover:bg-muted"
+                >
+                  <button type="button" onClick={() => set({ subject })}>
+                    {subject}
+                  </button>
+                </Badge>
+              ))}
+            </div>
+          )}
         </Field>
         <Field>
           <FieldLabel>Срок</FieldLabel>
@@ -148,26 +181,7 @@ export function TaskForm({
                 ))}
               </SelectContent>
             </Select>
-            {values.repeat === "none" ? (
-              <Select
-                value={values.reminder}
-                onValueChange={(reminder) => set({ reminder })}
-              >
-                <SelectTrigger
-                  aria-label="За сколько до срока"
-                  className="h-12 min-w-0 flex-1 text-base"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent position="popper">
-                  {reminders.map((reminder) => (
-                    <SelectItem key={reminder.value} value={reminder.value}>
-                      {reminder.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            ) : (
+            {values.repeat !== "none" && (
               <TimeFields
                 hour={Number(values.repeatTime.slice(0, 2))}
                 minute={Number(values.repeatTime.slice(3, 5))}
@@ -179,9 +193,30 @@ export function TaskForm({
               />
             )}
           </div>
+          {values.repeat === "none" && (
+            <ToggleGroup
+              type="multiple"
+              variant="outline"
+              className="flex w-full flex-wrap"
+              value={values.offsets.map(String)}
+              onValueChange={(picked) =>
+                set({ offsets: picked.map(Number).sort((a, b) => b - a) })
+              }
+            >
+              {reminders.map((reminder) => (
+                <ToggleGroupItem
+                  key={reminder.value}
+                  value={String(reminder.value)}
+                  className="h-10 px-3 text-sm"
+                >
+                  {reminder.chip}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+          )}
           <FieldDescription>
             {values.repeat === "none"
-              ? "Придёт один раз перед сроком."
+              ? `Придёт ${offsetsLabel(values.offsets)}.`
               : "Время по Москве. Push приходит до срока, потом задание уходит в архив."}
           </FieldDescription>
         </Field>
