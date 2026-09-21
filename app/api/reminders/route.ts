@@ -1,5 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { admin, deliver } from "@/lib/server";
+import { makeSnoozeToken } from "@/lib/snooze-token";
+import { cleanupAttachments } from "@/lib/cleanup-attachments";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 export async function GET(req: Request) {
@@ -14,6 +16,7 @@ export async function GET(req: Request) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   try {
     const db = admin();
+    await cleanupAttachments().catch(() => {});
     const { data, error } = await db.rpc("claim_reminders");
     if (error) throw error;
     let sent = 0,
@@ -31,6 +34,7 @@ export async function GET(req: Request) {
           title: task.title,
           body: `${task.subject} · срок ${new Date(task.due_at).toLocaleString("ru-RU", { timeZone: "Europe/Moscow", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" })} МСК`,
           tag: task.task_id,
+          snoozeToken: makeSnoozeToken(task.user_id, task.task_id),
         });
         if (!count) throw Error("No subscriptions");
         const { error: updateError } = await db
@@ -41,7 +45,8 @@ export async function GET(req: Request) {
           })
           .eq("task_id", task.task_id)
           .eq("user_id", task.user_id)
-          .eq("slot", task.slot);
+          .eq("slot", task.slot)
+          .eq("claimed_at", task.claimed_at);
         if (updateError) throw updateError;
         sent++;
       } catch {
@@ -51,7 +56,8 @@ export async function GET(req: Request) {
           .update({ claimed_at: null })
           .eq("task_id", task.task_id)
           .eq("user_id", task.user_id)
-          .eq("slot", task.slot);
+          .eq("slot", task.slot)
+          .eq("claimed_at", task.claimed_at);
       }
     }
     return Response.json({ sent, failed });

@@ -10,6 +10,7 @@ export type Task = {
   /** Легаси одного напоминания: колонка осталась в базе, но не читается. */
   reminder_minutes?: number;
   notes: string;
+  submission_url?: string;
   completed: boolean;
   priority: string;
   repeat_rule: string;
@@ -144,19 +145,25 @@ export const dateLabel = (value: string | Date) =>
 export const fullLabel = (value: string | Date) =>
   `${dateLabel(value)}, ${timeLabel(value)}`;
 
-/** "через 2 дня" / "срок прошёл 3 часа назад" — для подписи под заданием. */
+/**
+ * «завтра», «через 3 часа» — подпись под заданием. Дни считаются по календарю,
+ * иначе 30 часов превращаются в «завтра» и спорят с заголовком секции.
+ */
 export function relativeLabel(value: string) {
-  const diff = new Date(value).getTime() - Date.now();
-  const units: [Intl.RelativeTimeFormatUnit, number][] = [
-    ["minute", 60000],
-    ["hour", 3600000],
-    ["day", 86400000],
-  ];
+  const date = new Date(value),
+    now = new Date();
   const format = new Intl.RelativeTimeFormat("ru", { numeric: "auto" });
-  let [unit, size] = units[0];
-  for (const [nextUnit, nextSize] of units)
-    if (Math.abs(diff) >= nextSize) [unit, size] = [nextUnit, nextSize];
-  return format.format(Math.round(diff / size), unit);
+  const midnight = (d: Date) => {
+    const start = new Date(d);
+    start.setHours(0, 0, 0, 0);
+    return +start;
+  };
+  const days = Math.round((midnight(date) - midnight(now)) / 86400000);
+  if (days) return format.format(days, "day");
+  const diff = +date - +now;
+  if (Math.abs(diff) >= 3600000)
+    return format.format(Math.round(diff / 3600000), "hour");
+  return format.format(Math.round(diff / 60000), "minute");
 }
 
 /** Предметы из заданий: без повторов по регистру, частые выше. */

@@ -106,6 +106,7 @@ export function useDeadlines() {
           stored.map((t) => ({
             ...t,
             group_id: t.group_id ?? null,
+            reminder_offsets: t.reminder_offsets ?? [t.reminder_minutes ?? 1440],
             repeat_rule: t.repeat_rule ?? "none",
             repeat_time: t.repeat_time ?? null,
           })),

@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import {
+  AlignLeft,
   Archive,
   ArrowLeft,
   Bell,
@@ -10,6 +11,8 @@ import {
   Check,
   ChevronDown,
   Copy,
+  Ellipsis,
+  ExternalLink,
   Info,
   Pencil,
   Plus,
@@ -70,6 +73,9 @@ import {
   subjectList,
   timeLabel,
 } from "@/lib/deadlines";
+import { PersonalReminders } from "@/components/personal-reminders";
+import { TaskAttachments } from "@/components/task-attachments";
+import { safeSubmissionUrl } from "@/lib/personal-reminders";
 import { supabase } from "@/lib/supabase";
 
 export default function Home() {
@@ -87,6 +93,7 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [push, setPush] = useState(false);
   const [subject, setSubject] = useState("");
+  const [remindersOpen, setRemindersOpen] = useState(false);
   const [groupBy, setGroupBy] = useState<"date" | "subject">("date");
   const group = data.groups.find((g) => g.id === data.groupId);
 
@@ -132,6 +139,15 @@ export default function Home() {
     .filter((task) => !isArchived(task))
     .map((task) => new Date(task.due_at));
 
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("task");
+    const task = data.tasks.find((t) => t.id === id);
+    if (task) {
+      setSelected(task);
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+  }, [data.tasks]);
+
   function openForm(task: Task | null) {
     setEditing(task);
     setFormOpen(true);
@@ -152,6 +168,9 @@ export default function Home() {
       notes: values.notes.trim(),
     };
     try {
+      Object.assign(payload, {
+        submission_url: safeSubmissionUrl(values.submissionUrl),
+      });
       if (editing) {
         await data.updateTask(editing.id, payload);
         if (values.due > new Date() && isArchived(editing))
@@ -424,7 +443,7 @@ export default function Home() {
 
           {subjects.length > 1 && (
             <div className="mb-5 flex items-center gap-2">
-              <div className="-mx-5 flex flex-1 gap-1.5 overflow-x-auto px-5 pb-1 sm:mx-0 sm:px-0">
+              <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto py-1 pr-6 [mask-image:linear-gradient(to_right,black_calc(100%_-_24px),transparent)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 {["", ...subjects].map((name) => (
                   <Button
                     key={name || "all"}
@@ -577,6 +596,12 @@ export default function Home() {
                               {isOverdue(task)
                                 ? `срок прошёл ${relativeLabel(task.due_at)}`
                                 : relativeLabel(task.due_at)}
+                              {task.notes && (
+                                <AlignLeft
+                                  aria-label="Есть заметка"
+                                  className="ml-1.5 inline size-3.5 shrink-0 align-[-2px] text-muted-foreground"
+                                />
+                              )}
                             </p>
                           </div>
                         </Button>
@@ -665,63 +690,73 @@ export default function Home() {
 
       <Panel
         open={!!selected}
-        onOpenChange={(open) => !open && setSelected(null)}
+        onOpenChange={(open) => {
+          if (open) return;
+          setSelected(null);
+          setRemindersOpen(false);
+        }}
         title={selected?.title || "Задание"}
         description={selected?.subject || "Подробности"}
       >
         {selected && (
           <div className="space-y-5">
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
               <Badge variant="secondary">
                 {selected.group_id ? "Для группы" : "Личное"}
               </Badge>
               {isOverdue(selected) && (
                 <Badge variant="destructive">Срок прошёл</Badge>
               )}
-              {selected.repeat_rule !== "none" && (
-                <Badge variant="outline">
-                  <Repeat />
-                  {pushLabel(selected)}
-                </Badge>
-              )}
-              <span className="text-sm text-muted-foreground">
-                {fullLabel(selected.due_at)}
+              <span>{fullLabel(selected.due_at)}</span>
+              <span aria-hidden>·</span>
+              <span className="inline-flex items-center gap-1">
+                {selected.repeat_rule !== "none" && (
+                  <Repeat className="size-3.5" />
+                )}
+                {pushLabel(selected)}
               </span>
             </div>
             {selected.notes && (
-              <p className="text-base leading-relaxed break-words whitespace-pre-wrap">
+              <p className="rounded-xl border-l-2 border-primary/40 bg-muted/50 p-3 text-sm leading-relaxed break-words whitespace-pre-wrap">
                 {selected.notes}
               </p>
             )}
-            <p className="text-sm text-muted-foreground">
-              Push: {pushLabel(selected)}
-            </p>
+            {selected.submission_url &&
+              /^https?:\/\//i.test(selected.submission_url) && (
+                <a
+                  href={selected.submission_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 text-sm font-medium text-primary hover:underline"
+                >
+                  <ExternalLink className="size-4" />
+                  Куда сдавать
+                </a>
+              )}
+            <TaskAttachments
+              key={selected.id + "files"}
+              taskId={selected.id}
+              editable={data.isMine(selected)}
+            />
+            {remindersOpen && (
+              <PersonalReminders
+                key={selected.id}
+                task={selected}
+                cloud={data.cloud}
+                userId={data.user?.id}
+              />
+            )}
             <Separator />
             <p className="text-sm text-muted-foreground">
               {isOverdue(selected)
                 ? "Срок прошёл, задание лежит в архиве. Поставь новый срок, чтобы вернуть его в список."
                 : selected.group_id
-                  ? "«Убрать» скроет задание только у тебя на этом устройстве — у группы оно останется."
-                  : "«Убрать» отправит задание в архив. Оттуда его всегда можно вернуть."}
+                  ? "«Убрать» скроет задание только у тебя — у группы оно останется."
+                  : "«Убрать» отправит задание в архив, вернуть можно оттуда."}
             </p>
-            <div className="grid gap-2">
-              {data.isMine(selected) && (
-                <Button
-                  variant="outline"
-                  className="h-12 w-full"
-                  onClick={() => {
-                    const task = selected;
-                    setSelected(null);
-                    openForm(task);
-                  }}
-                >
-                  <Pencil />
-                  Изменить
-                </Button>
-              )}
+            <div className="space-y-2">
               {!isOverdue(selected) && (
                 <Button
-                  variant="secondary"
                   className="h-12 w-full"
                   onClick={() => {
                     if (isArchived(selected)) void data.restore(selected.id);
@@ -737,16 +772,55 @@ export default function Home() {
                       : "Убрать в архив"}
                 </Button>
               )}
-              {data.isMine(selected) && (
-                <Button
-                  variant="ghost"
-                  className="h-12 w-full text-destructive hover:text-destructive"
-                  onClick={() => setRemoving(selected)}
-                >
-                  <Trash2 />
-                  Удалить навсегда
-                </Button>
-              )}
+              <div className="flex gap-2">
+                {data.isMine(selected) && (
+                  <Button
+                    variant={isOverdue(selected) ? "default" : "outline"}
+                    className="h-12 flex-1"
+                    onClick={() => {
+                      const task = selected;
+                      setSelected(null);
+                      openForm(task);
+                    }}
+                  >
+                    <Pencil />
+                    {isOverdue(selected) ? "Новый срок" : "Изменить"}
+                  </Button>
+                )}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className={`size-12 shrink-0 ${data.isMine(selected) ? "" : "w-full"}`}
+                      aria-label="Ещё действия"
+                    >
+                      <Ellipsis />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56">
+                    <DropdownMenuItem
+                      onSelect={() => setRemindersOpen(true)}
+                      disabled={remindersOpen}
+                    >
+                      <Bell />
+                      Мои напоминания
+                    </DropdownMenuItem>
+                    {data.isMine(selected) && (
+                      <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          variant="destructive"
+                          onSelect={() => setRemoving(selected)}
+                        >
+                          <Trash2 />
+                          Удалить навсегда
+                        </DropdownMenuItem>
+                      </>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             </div>
           </div>
         )}

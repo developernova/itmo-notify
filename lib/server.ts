@@ -25,7 +25,7 @@ export async function authenticate(request: Request) {
 }
 export async function deliver(
   userId: string,
-  payload: { tag?: string; title: string; body: string },
+  payload: { tag?: string; title: string; body: string; snoozeToken?: string },
 ) {
   const db = admin(),
     client = pushClient();
@@ -50,4 +50,24 @@ export async function deliver(
     }
   }
   return sent;
+}
+
+export async function accessibleTask(userId: string, taskId: string) {
+  const db = admin();
+  const { data: task, error } = await db
+    .from("tasks")
+    .select("*")
+    .eq("id", taskId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!task) return null;
+  if (!task.group_id) return task.user_id === userId ? task : null;
+  const { data: member, error: memberError } = await db
+    .from("group_members")
+    .select("user_id")
+    .eq("user_id", userId)
+    .eq("group_id", task.group_id)
+    .maybeSingle();
+  if (memberError) throw memberError;
+  return member ? task : null;
 }
