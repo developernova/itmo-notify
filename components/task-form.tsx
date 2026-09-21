@@ -39,6 +39,7 @@ export type TaskValues = {
   /** «20:00», время повтора push. */
   repeatTime: string;
   notes: string;
+  submissionUrl: string;
   scope: "group" | "personal";
 };
 
@@ -73,6 +74,7 @@ export function TaskForm({
     repeat: task?.repeat_rule ?? "none",
     repeatTime: (task?.repeat_time ?? "").slice(0, 5) || defaultTime(task),
     notes: task?.notes ?? "",
+    submissionUrl: task?.submission_url ?? "",
     scope: task ? (task.group_id ? "group" : "personal") : scope,
   });
   const set = (patch: Partial<TaskValues>) =>
@@ -221,6 +223,17 @@ export function TaskForm({
           </FieldDescription>
         </Field>
         <Field>
+          <FieldLabel htmlFor="submission">Куда сдавать</FieldLabel>
+          <Input
+            id="submission"
+            type="url"
+            maxLength={2048}
+            placeholder="Ссылка на Moodle, форму или репозиторий"
+            value={values.submissionUrl}
+            onChange={(e) => set({ submissionUrl: e.target.value })}
+          />
+        </Field>
+        <Field>
           <FieldLabel htmlFor="notes">
             Заметка{" "}
             <span className="text-muted-foreground">· необязательно</span>
@@ -231,9 +244,12 @@ export function TaskForm({
             maxLength={2000}
             value={values.notes}
             onChange={(e) => set({ notes: e.target.value })}
-            placeholder="Ссылка или подробности"
+            placeholder="Что важно знать о задании"
           />
         </Field>
+        <FieldDescription>
+          Фото и документы можно прикрепить в карточке после сохранения.
+        </FieldDescription>
       </FieldGroup>
       <Button
         type="submit"
